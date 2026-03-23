@@ -1,11 +1,17 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
-langchain
-langchain-google-genai
-tavily-python
 python-dotenv
-duckduckgo-search
-beautifulsoup4
 requests
+beautifulsoup4
 gTTS
+
+# LangChain stack
+langchain
+langchain-core
+langchain-community
+langchain-google-genai
+
+# Search tools
+tavily-python
+duckduckgo-search
