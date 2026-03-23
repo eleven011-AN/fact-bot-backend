@@ -2,7 +2,7 @@ import requests  # type: ignore
 import json
 import time
 
-API_URL = "http://localhost:8000/api/verify"
+API_URL = "https://fact-bot-backend.onrender.com/api/verify"
 
 complex_text = "The Great Wall of China is the only man-made object visible from space with the naked eye. Also, water boils at 100 degrees Celsius at standard atmospheric pressure. Finally, eating raw chicken is considered a highly recommended healthy diet for human cardiovascular health."
 
