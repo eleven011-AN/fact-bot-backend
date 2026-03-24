@@ -89,15 +89,16 @@ def debug_env():
 
 @app.get("/api/test-gemini")
 def test_gemini():
-    """Directly test the Gemini API key."""
+    """Directly test the Gemini API key using the native SDK."""
     try:
-        from langchain_google_genai import ChatGoogleGenerativeAI
+        import google.generativeai as genai  # type: ignore
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
             return {"success": False, "error": "GOOGLE_API_KEY not set"}
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", google_api_key=api_key, temperature=0)
-        resp = llm.invoke("Say OK in one word")
-        return {"success": True, "response": resp.content}
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        resp = model.generate_content("Say OK in one word")
+        return {"success": True, "response": resp.text}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
