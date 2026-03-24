@@ -7,12 +7,12 @@ from models import ClaimStatus, Source  # type: ignore
 
 
 def verify_claim(claim_id: int, claim_text: str, evidence: list, language: str = 'English') -> ClaimStatus:
-    from openai import OpenAI  # type: ignore
+    from groq import Groq  # type: ignore
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise ValueError("OPENAI_API_KEY is not set.")
-    client = OpenAI(api_key=api_key)
+        raise ValueError("GROQ_API_KEY is not set.")
+    client = Groq(api_key=api_key)
 
     evidence_text = "\n\n".join([
         f"Source: {e.get('url', e.get('link', 'Unknown'))}\nSnippet: {e.get('snippet', e.get('content', ''))}"
@@ -47,7 +47,7 @@ def verify_claim(claim_id: int, claim_text: str, evidence: list, language: str =
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},

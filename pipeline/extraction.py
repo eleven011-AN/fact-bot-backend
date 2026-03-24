@@ -5,23 +5,24 @@ from typing import List
 
 
 class RateLimitError(Exception):
-    """Raised when the OpenAI API quota / rate limit is exceeded."""
+    """Raised when the Groq API quota / rate limit is exceeded."""
     pass
 
 
 def _get_client():
-    from openai import OpenAI  # type: ignore
-    api_key = os.getenv("OPENAI_API_KEY")
+    from groq import Groq  # type: ignore
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise ValueError("OPENAI_API_KEY is not set. Please set it in .env or Render environment.")
-    return OpenAI(api_key=api_key)
+        raise ValueError("GROQ_API_KEY is not set.")
+    return Groq(api_key=api_key)
 
 
-def _chat(client, system: str, user: str) -> str:
-    """Call OpenAI chat completion and return the text response."""
+def _chat(system: str, user: str) -> str:
+    """Call Groq chat completion and return the text response."""
     try:
+        client = _get_client()
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -32,9 +33,9 @@ def _chat(client, system: str, user: str) -> str:
         return response.choices[0].message.content or ""
     except Exception as e:
         err_str = str(e)
-        if "429" in err_str or "quota" in err_str.lower() or "rate_limit" in err_str.lower():
+        if "429" in err_str or "rate_limit" in err_str.lower() or "quota" in err_str.lower():
             raise RateLimitError(
-                "OpenAI API quota exceeded. Please wait a moment and try again."
+                "Groq API rate limit hit. Please wait a moment and try again."
             )
         raise
 
@@ -59,11 +60,10 @@ def extract_claims(text: str, language: str = 'English') -> List[str]:
         "You are an expert fact-checker. The input text may be in any language. "
         "Decompose the text into distinct, independent, verifiable factual claims.\n"
         f"{lang_instruction}\n"
-        "Output ONLY a JSON object: {\"claims\": [\"Claim 1\", \"Claim 2\"]}"
+        'Output ONLY a JSON object: {"claims": ["Claim 1", "Claim 2"]}'
     )
     try:
-        client = _get_client()
-        content = _chat(client, system, text)
+        content = _chat(system, text)
         return _parse_claims_json(content)
     except RateLimitError:
         raise
@@ -73,12 +73,19 @@ def extract_claims(text: str, language: str = 'English') -> List[str]:
 
 
 def extract_claims_from_image(base64_data: str, language: str = 'English') -> List[str]:
-    from openai import OpenAI  # type: ignore
+    """
+    Groq supports vision via llama-4-scout-17b-16e-instruct.
+    Falls back to asking user to type the claim if vision fails.
+    """
+    from groq import Groq  # type: ignore
+    import base64 as b64mod
 
     if "," in base64_data:
-        base64_str = base64_data  # keep full data URL for OpenAI
+        mime_type = base64_data.split(';')[0].split(':')[1]
+        base64_str = base64_data.split(',')[1]
     else:
-        base64_str = f"data:image/jpeg;base64,{base64_data}"
+        mime_type = "image/jpeg"
+        base64_str = base64_data
 
     lang_instruction = (
         f"IMPORTANT: Write your output JSON values in {language}."
@@ -88,21 +95,23 @@ def extract_claims_from_image(base64_data: str, language: str = 'English') -> Li
         "You are an expert fact-checker. Extract distinct, verifiable factual claims "
         "from the text visible in this image. "
         f"{lang_instruction}\n"
-        "Output ONLY a JSON object: {\"claims\": [\"Claim 1\"]}"
+        'Output ONLY a JSON object: {"claims": ["Claim 1"]}'
     )
 
     try:
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
-            raise ValueError("OPENAI_API_KEY is not set.")
-        client = OpenAI(api_key=api_key)
+            raise ValueError("GROQ_API_KEY is not set.")
+        client = Groq(api_key=api_key)
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             messages=[{
                 "role": "user",
                 "content": [
                     {"type": "text", "text": system_prompt},
-                    {"type": "image_url", "image_url": {"url": base64_str}},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:{mime_type};base64,{base64_str}"
+                    }},
                 ],
             }],
             temperature=0,
@@ -114,7 +123,7 @@ def extract_claims_from_image(base64_data: str, language: str = 'English') -> Li
         raise
     except Exception as e:
         err_str = str(e)
-        if "429" in err_str or "quota" in err_str.lower():
-            raise RateLimitError("OpenAI API quota exceeded.")
+        if "429" in err_str or "rate_limit" in err_str.lower():
+            raise RateLimitError("Groq API rate limit hit.")
         print(f"Image extraction error: {e}")
         return []

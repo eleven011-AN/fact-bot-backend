@@ -78,26 +78,26 @@ def read_root():
 @app.get("/api/debug-env")
 def debug_env():
     """Check if API keys are loaded correctly on Render."""
-    openai_key = os.getenv("OPENAI_API_KEY", "")
+    groq_key = os.getenv("GROQ_API_KEY", "")
     tavily_key = os.getenv("TAVILY_API_KEY", "")
     return {
-        "openai_key_set": bool(openai_key),
-        "openai_key_preview": openai_key[:7] + "..." if openai_key else "NOT SET",
+        "groq_key_set": bool(groq_key),
+        "groq_key_preview": groq_key[:8] + "..." if groq_key else "NOT SET",
         "tavily_key_set": bool(tavily_key),
         "tavily_key_preview": tavily_key[:6] + "..." if tavily_key else "NOT SET",
     }
 
-@app.get("/api/test-openai")
-def test_openai():
-    """Directly test the OpenAI API key."""
+@app.get("/api/test-groq")
+def test_groq():
+    """Directly test the Groq API key."""
     try:
-        from openai import OpenAI  # type: ignore
-        api_key = os.getenv("OPENAI_API_KEY")
+        from groq import Groq  # type: ignore
+        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
-            return {"success": False, "error": "OPENAI_API_KEY not set"}
-        client = OpenAI(api_key=api_key)
+            return {"success": False, "error": "GROQ_API_KEY not set"}
+        client = Groq(api_key=api_key)
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": "Say OK"}],
             max_tokens=5,
         )

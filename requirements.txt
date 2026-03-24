@@ -6,10 +6,10 @@ requests
 beautifulsoup4
 gTTS
 
-# OpenAI (primary LLM)
-openai
+# Groq (primary LLM — free, fast Llama 3)
+groq
 
-# LangChain stack (for search tools only)
+# LangChain (for search tools only)
 langchain
 langchain-core
 langchain-community
