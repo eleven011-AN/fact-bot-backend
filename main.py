@@ -78,27 +78,30 @@ def read_root():
 @app.get("/api/debug-env")
 def debug_env():
     """Check if API keys are loaded correctly on Render."""
-    google_key = os.getenv("GOOGLE_API_KEY", "")
+    openai_key = os.getenv("OPENAI_API_KEY", "")
     tavily_key = os.getenv("TAVILY_API_KEY", "")
     return {
-        "google_key_set": bool(google_key),
-        "google_key_preview": google_key[:6] + "..." if google_key else "NOT SET",
+        "openai_key_set": bool(openai_key),
+        "openai_key_preview": openai_key[:7] + "..." if openai_key else "NOT SET",
         "tavily_key_set": bool(tavily_key),
         "tavily_key_preview": tavily_key[:6] + "..." if tavily_key else "NOT SET",
     }
 
-@app.get("/api/test-gemini")
-def test_gemini():
-    """Directly test the Gemini API key using the native SDK."""
+@app.get("/api/test-openai")
+def test_openai():
+    """Directly test the OpenAI API key."""
     try:
-        import google.generativeai as genai  # type: ignore
-        api_key = os.getenv("GOOGLE_API_KEY")
+        from openai import OpenAI  # type: ignore
+        api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            return {"success": False, "error": "GOOGLE_API_KEY not set"}
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        resp = model.generate_content("Say OK in one word")
-        return {"success": True, "response": resp.text}
+            return {"success": False, "error": "OPENAI_API_KEY not set"}
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Say OK"}],
+            max_tokens=5,
+        )
+        return {"success": True, "response": resp.choices[0].message.content}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

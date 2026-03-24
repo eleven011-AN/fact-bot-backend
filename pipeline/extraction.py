@@ -1,43 +1,42 @@
 import os
 import json
 import re
-import time
 from typing import List
 
 
 class RateLimitError(Exception):
-    """Raised when the Gemini API quota / rate limit is exceeded."""
+    """Raised when the OpenAI API quota / rate limit is exceeded."""
     pass
 
 
-def _get_model():
-    """Return a configured Gemini 2.0 Flash GenerativeModel."""
-    import google.generativeai as genai  # type: ignore
-    api_key = os.getenv("GOOGLE_API_KEY")
+def _get_client():
+    from openai import OpenAI  # type: ignore
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise ValueError("GOOGLE_API_KEY is not set. Please set it in .env")
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-2.0-flash")
+        raise ValueError("OPENAI_API_KEY is not set. Please set it in .env or Render environment.")
+    return OpenAI(api_key=api_key)
 
 
-def _generate_with_retry(model, prompt, max_retries: int = 3):
-    """Call model.generate_content with exponential backoff on 429 errors."""
-    for attempt in range(max_retries):
-        try:
-            return model.generate_content(prompt)
-        except Exception as e:
-            err_str = str(e)
-            is_rate_limit = "429" in err_str or "ResourceExhausted" in err_str or "quota" in err_str.lower()
-            if is_rate_limit:
-                if attempt < max_retries - 1:
-                    wait = 15 * (attempt + 1)  # 15s, 30s, 45s
-                    print(f"Rate limit hit, retrying in {wait}s...")
-                    time.sleep(wait)
-                    continue
-                raise RateLimitError(
-                    "Gemini API quota exceeded. Please wait a minute and try again."
-                )
-            raise
+def _chat(client, system: str, user: str) -> str:
+    """Call OpenAI chat completion and return the text response."""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0,
+            max_tokens=2000,
+        )
+        return response.choices[0].message.content or ""
+    except Exception as e:
+        err_str = str(e)
+        if "429" in err_str or "quota" in err_str.lower() or "rate_limit" in err_str.lower():
+            raise RateLimitError(
+                "OpenAI API quota exceeded. Please wait a moment and try again."
+            )
+        raise
 
 
 def _parse_claims_json(content: str) -> List[str]:
@@ -56,18 +55,16 @@ def extract_claims(text: str, language: str = 'English') -> List[str]:
         f"IMPORTANT: Write your output JSON values in {language}."
         if language and language != 'English' else ""
     )
-    prompt = (
-        "You are an expert fact-checker. Decompose the following text into distinct, "
-        "independent, verifiable factual claims.\n"
+    system = (
+        "You are an expert fact-checker. The input text may be in any language. "
+        "Decompose the text into distinct, independent, verifiable factual claims.\n"
         f"{lang_instruction}\n"
-        "Output ONLY a JSON object with a 'claims' key containing a list of strings.\n"
-        'Example: {"claims": ["Claim 1", "Claim 2"]}\n\n'
-        f"TEXT:\n{text}"
+        "Output ONLY a JSON object: {\"claims\": [\"Claim 1\", \"Claim 2\"]}"
     )
     try:
-        model = _get_model()
-        response = _generate_with_retry(model, prompt)
-        return _parse_claims_json(response.text)
+        client = _get_client()
+        content = _chat(client, system, text)
+        return _parse_claims_json(content)
     except RateLimitError:
         raise
     except Exception as e:
@@ -76,39 +73,48 @@ def extract_claims(text: str, language: str = 'English') -> List[str]:
 
 
 def extract_claims_from_image(base64_data: str, language: str = 'English') -> List[str]:
-    import google.generativeai as genai  # type: ignore
-    import base64 as b64mod
+    from openai import OpenAI  # type: ignore
 
     if "," in base64_data:
-        mime_type = base64_data.split(';')[0].split(':')[1]
-        base64_str = base64_data.split(',')[1]
+        base64_str = base64_data  # keep full data URL for OpenAI
     else:
-        mime_type = "image/jpeg"
-        base64_str = base64_data
+        base64_str = f"data:image/jpeg;base64,{base64_data}"
 
     lang_instruction = (
         f"IMPORTANT: Write your output JSON values in {language}."
         if language and language != 'English' else ""
     )
-    prompt = (
+    system_prompt = (
         "You are an expert fact-checker. Extract distinct, verifiable factual claims "
         "from the text visible in this image. "
         f"{lang_instruction}\n"
-        "Output ONLY a JSON object with a 'claims' key containing a list of strings.\n"
-        '{"claims": ["Claim 1"]}'
+        "Output ONLY a JSON object: {\"claims\": [\"Claim 1\"]}"
     )
 
     try:
-        api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY is not set.")
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        image_part = {"mime_type": mime_type, "data": b64mod.b64decode(base64_str)}
-        response = _generate_with_retry(model, [prompt, image_part])
-        return _parse_claims_json(response.text)
+            raise ValueError("OPENAI_API_KEY is not set.")
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": system_prompt},
+                    {"type": "image_url", "image_url": {"url": base64_str}},
+                ],
+            }],
+            temperature=0,
+            max_tokens=2000,
+        )
+        content = response.choices[0].message.content or ""
+        return _parse_claims_json(content)
     except RateLimitError:
         raise
     except Exception as e:
+        err_str = str(e)
+        if "429" in err_str or "quota" in err_str.lower():
+            raise RateLimitError("OpenAI API quota exceeded.")
         print(f"Image extraction error: {e}")
         return []

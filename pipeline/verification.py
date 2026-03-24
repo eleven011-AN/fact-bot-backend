@@ -2,34 +2,17 @@ import os
 import sys
 import json
 import re
-import time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import ClaimStatus, Source  # type: ignore
 
 
-def _generate_with_retry(model, prompt, max_retries: int = 3):
-    for attempt in range(max_retries):
-        try:
-            return model.generate_content(prompt)
-        except Exception as e:
-            err_str = str(e)
-            if "429" in err_str or "ResourceExhausted" in err_str or "quota" in err_str.lower():
-                if attempt < max_retries - 1:
-                    wait = 15 * (attempt + 1)
-                    print(f"Rate limit, retrying in {wait}s...")
-                    time.sleep(wait)
-                    continue
-            raise
-
-
 def verify_claim(claim_id: int, claim_text: str, evidence: list, language: str = 'English') -> ClaimStatus:
-    import google.generativeai as genai  # type: ignore
+    from openai import OpenAI  # type: ignore
 
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise ValueError("GOOGLE_API_KEY is not set.")
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+        raise ValueError("OPENAI_API_KEY is not set.")
+    client = OpenAI(api_key=api_key)
 
     evidence_text = "\n\n".join([
         f"Source: {e.get('url', e.get('link', 'Unknown'))}\nSnippet: {e.get('snippet', e.get('content', ''))}"
@@ -51,21 +34,28 @@ def verify_claim(claim_id: int, claim_text: str, evidence: list, language: str =
             f"The 'verdict' must stay in English (True / False / Partially True / Unverifiable)."
         )
 
-    prompt = (
+    system = (
         f"You are an expert fact-checker.{lang_rule}\n\n"
-        "Compare the CLAIM against the EVIDENCE and classify it as: True, False, Partially True, or Unverifiable.\n"
-        "Output ONLY a JSON object with exactly these keys: 'verdict', 'confidence', 'explanation'.\n"
-        "Rules:\n"
-        "- 'verdict': always in English — one of: True, False, Partially True, Unverifiable\n"
-        "- 'confidence': a float between 0.0 and 1.0\n"
+        "Compare the CLAIM against the EVIDENCE and classify it.\n"
+        "Output ONLY a JSON object with exactly these keys:\n"
+        "- 'verdict': one of: True, False, Partially True, Unverifiable (always in English)\n"
+        "- 'confidence': float 0.0-1.0\n"
         f"- 'explanation': {'MUST be in ' + language if language and language != 'English' else 'clear English explanation'}\n"
-        '- Example: {"verdict": "True", "confidence": 0.95, "explanation": "..."}\n\n'
-        f"CLAIM: {claim_text}\n\nEVIDENCE:\n{evidence_text}"
+        'Example: {"verdict": "True", "confidence": 0.95, "explanation": "..."}'
     )
+    user = f"CLAIM: {claim_text}\n\nEVIDENCE:\n{evidence_text}"
 
     try:
-        response = _generate_with_retry(model, prompt)
-        content = response.text
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0,
+            max_tokens=1000,
+        )
+        content = response.choices[0].message.content or ""
         match = re.search(r'\{.*\}', content, re.DOTALL)
         if match:
             data = json.loads(match.group(0))

@@ -6,14 +6,13 @@ requests
 beautifulsoup4
 gTTS
 
-# Google Gemini — direct SDK (primary)
-google-generativeai
+# OpenAI (primary LLM)
+openai
 
-# LangChain stack (kept for search tools)
+# LangChain stack (for search tools only)
 langchain
 langchain-core
 langchain-community
-langchain-google-genai
 
 # Search tools
 tavily-python
