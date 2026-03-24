@@ -31,15 +31,45 @@ app.add_middleware(
 )
 
 def fetch_url_text(url: str) -> str:
+    """Fetch article text from a URL, following redirects and stripping HTML."""
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=15, headers=headers, allow_redirects=True)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        paragraphs = soup.find_all('p')
-        text = " ".join([p.get_text() for p in paragraphs])
-        return str(text)[:10000]  # Limit to 10k chars
+
+        # Remove script/style noise
+        for tag in soup(["script", "style", "nav", "footer", "header"]):
+            tag.decompose()
+
+        # Try article body first, then fall back to all paragraphs
+        article = soup.find('article')
+        if article:
+            text = article.get_text(separator=" ", strip=True)
+        else:
+            tags = soup.find_all(['p', 'h1', 'h2', 'h3', 'li'])
+            text = " ".join(t.get_text(strip=True) for t in tags)
+
+        text = text.strip()
+        if not text or len(text) < 50:
+            raise ValueError(
+                "The page at that URL appears to be empty, blocked, or a redirect. "
+                "Please paste the actual article URL (not a Bing/Google search result link)."
+            )
+        return text[:10000]  # Limit to 10k chars
+    except ValueError:
+        raise
     except Exception as e:
-        raise ValueError(f"Failed to extract text from URL: {e}")
+        raise ValueError(f"Could not read the URL — {e}")
+
 
 @app.get("/")
 def read_root():
