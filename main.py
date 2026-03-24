@@ -246,8 +246,8 @@ async def text_to_speech(req: TTSRequest):
 
 @app.post("/api/verify", response_model=VerifyResponse)
 async def verify_content(request: VerifyRequest):
-    if not os.getenv("GOOGLE_API_KEY"):
-        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY is not configured on the server.")
+    if not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured on the server.")
     try:
         if request.type == 'image':
             if not request.value.strip():
