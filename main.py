@@ -75,6 +75,33 @@ def fetch_url_text(url: str) -> str:
 def read_root():
     return {"status": "ok", "message": "Fact Checking API is running!"}
 
+@app.get("/api/debug-env")
+def debug_env():
+    """Check if API keys are loaded correctly on Render."""
+    google_key = os.getenv("GOOGLE_API_KEY", "")
+    tavily_key = os.getenv("TAVILY_API_KEY", "")
+    return {
+        "google_key_set": bool(google_key),
+        "google_key_preview": google_key[:6] + "..." if google_key else "NOT SET",
+        "tavily_key_set": bool(tavily_key),
+        "tavily_key_preview": tavily_key[:6] + "..." if tavily_key else "NOT SET",
+    }
+
+@app.get("/api/test-gemini")
+def test_gemini():
+    """Directly test the Gemini API key."""
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            return {"success": False, "error": "GOOGLE_API_KEY not set"}
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", google_api_key=api_key, temperature=0)
+        resp = llm.invoke("Say OK in one word")
+        return {"success": True, "response": resp.content}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # ─── Live News Endpoint (GNews API) ───────────────────────────────────────────
 NEWS_CACHE = {}
 CACHE_TTL = 1800 # 30 mins
