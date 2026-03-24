@@ -2,8 +2,24 @@ import os
 import sys
 import json
 import re
+import time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import ClaimStatus, Source  # type: ignore
+
+
+def _generate_with_retry(model, prompt, max_retries: int = 3):
+    for attempt in range(max_retries):
+        try:
+            return model.generate_content(prompt)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "ResourceExhausted" in err_str or "quota" in err_str.lower():
+                if attempt < max_retries - 1:
+                    wait = 15 * (attempt + 1)
+                    print(f"Rate limit, retrying in {wait}s...")
+                    time.sleep(wait)
+                    continue
+            raise
 
 
 def verify_claim(claim_id: int, claim_text: str, evidence: list, language: str = 'English') -> ClaimStatus:
@@ -48,7 +64,7 @@ def verify_claim(claim_id: int, claim_text: str, evidence: list, language: str =
     )
 
     try:
-        response = model.generate_content(prompt)
+        response = _generate_with_retry(model, prompt)
         content = response.text
         match = re.search(r'\{.*\}', content, re.DOTALL)
         if match:

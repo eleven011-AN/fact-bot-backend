@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 from typing import List
 
 
@@ -9,8 +10,8 @@ class RateLimitError(Exception):
     pass
 
 
-def _get_gemini():
-    """Return a configured Gemini GenerativeModel using the direct SDK."""
+def _get_model():
+    """Return a configured Gemini 2.0 Flash GenerativeModel."""
     import google.generativeai as genai  # type: ignore
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
@@ -19,8 +20,27 @@ def _get_gemini():
     return genai.GenerativeModel("gemini-2.0-flash")
 
 
+def _generate_with_retry(model, prompt, max_retries: int = 3):
+    """Call model.generate_content with exponential backoff on 429 errors."""
+    for attempt in range(max_retries):
+        try:
+            return model.generate_content(prompt)
+        except Exception as e:
+            err_str = str(e)
+            is_rate_limit = "429" in err_str or "ResourceExhausted" in err_str or "quota" in err_str.lower()
+            if is_rate_limit:
+                if attempt < max_retries - 1:
+                    wait = 15 * (attempt + 1)  # 15s, 30s, 45s
+                    print(f"Rate limit hit, retrying in {wait}s...")
+                    time.sleep(wait)
+                    continue
+                raise RateLimitError(
+                    "Gemini API quota exceeded. Please wait a minute and try again."
+                )
+            raise
+
+
 def _parse_claims_json(content: str) -> List[str]:
-    """Extract claims list from a JSON string."""
     match = re.search(r'\{.*\}', content, re.DOTALL)
     if match:
         try:
@@ -37,33 +57,28 @@ def extract_claims(text: str, language: str = 'English') -> List[str]:
         if language and language != 'English' else ""
     )
     prompt = (
-        "You are an expert fact-checker. The input text may be in any language — understand it fully regardless. "
-        "Decompose the following text into distinct, independent, verifiable factual claims.\n"
+        "You are an expert fact-checker. Decompose the following text into distinct, "
+        "independent, verifiable factual claims.\n"
         f"{lang_instruction}\n"
-        "Output your response ONLY as a JSON object with a 'claims' key containing a list of strings.\n"
+        "Output ONLY a JSON object with a 'claims' key containing a list of strings.\n"
         'Example: {"claims": ["Claim 1", "Claim 2"]}\n\n'
         f"TEXT:\n{text}"
     )
     try:
-        model = _get_gemini()
-        response = model.generate_content(prompt)
+        model = _get_model()
+        response = _generate_with_retry(model, prompt)
         return _parse_claims_json(response.text)
     except RateLimitError:
         raise
     except Exception as e:
-        err_str = str(e)
-        if "429" in err_str or "ResourceExhausted" in err_str or "quota" in err_str.lower():
-            raise RateLimitError(
-                "Gemini API quota exceeded. Please wait a minute and try again."
-            )
         print(f"Extraction error: {e}")
         return []
 
 
 def extract_claims_from_image(base64_data: str, language: str = 'English') -> List[str]:
     import google.generativeai as genai  # type: ignore
+    import base64 as b64mod
 
-    # Strip data URL prefix
     if "," in base64_data:
         mime_type = base64_data.split(';')[0].split(':')[1]
         base64_str = base64_data.split(',')[1]
@@ -76,14 +91,13 @@ def extract_claims_from_image(base64_data: str, language: str = 'English') -> Li
         if language and language != 'English' else ""
     )
     prompt = (
-        "You are an expert fact-checker. Extract distinct, independent, verifiable factual claims "
+        "You are an expert fact-checker. Extract distinct, verifiable factual claims "
         "from the text visible in this image. "
         f"{lang_instruction}\n"
         "Output ONLY a JSON object with a 'claims' key containing a list of strings.\n"
-        'Example: {"claims": ["Claim 1"]}'
+        '{"claims": ["Claim 1"]}'
     )
 
-    import base64 as b64mod
     try:
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
@@ -91,15 +105,10 @@ def extract_claims_from_image(base64_data: str, language: str = 'English') -> Li
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.0-flash")
         image_part = {"mime_type": mime_type, "data": b64mod.b64decode(base64_str)}
-        response = model.generate_content([prompt, image_part])
+        response = _generate_with_retry(model, [prompt, image_part])
         return _parse_claims_json(response.text)
     except RateLimitError:
         raise
     except Exception as e:
-        err_str = str(e)
-        if "429" in err_str or "ResourceExhausted" in err_str or "quota" in err_str.lower():
-            raise RateLimitError(
-                "Gemini API quota exceeded. Please wait a minute and try again."
-            )
         print(f"Image extraction error: {e}")
         return []
